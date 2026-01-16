@@ -4,6 +4,8 @@ import hashlib
 import os
 import base64
 from cryptography.fernet import Fernet
+import string
+import secrets 
 
 vault_path = Path.home() / "password_manager" / "vault.json"
 def CURD():
@@ -87,6 +89,23 @@ def addNewPassword(key,data,password, site = '', username=''):
      data['passwords'] = passwords
      return data # maybe directly write 
 
+def searchsite(site,data):
+     passwords = data.get("passwords",[])
+     found = []
+     for d in passwords:
+          if d.get('Website') == site:
+               found.append(d)
+     if len(found) == 0:
+          return 'No website found'
+     else:
+          return found
+
+
+def generaterandPassword(length = 12):
+     chrac = string.ascii_letters+string.digits+string.punctuation
+     password = ''.join(secrets.choice(chrac) for _ in range(length))
+     return password
+
 
      
 
@@ -102,47 +121,69 @@ def view_all_passwords(key, data):
         else:
                break
 
+def check():
+     if vault_path.exists() and vault_path.is_file():
+          return True
+     else:
+          return False
+
      
-     
+def welcome():
+     print("WELCOME")
 
+def CURDmanager(key, data):
+     while True:
+        try:
+          user_inp = int(input(">>"))
+          break
+        except:
+             print("Something went wrong! please eneter a valid number")
+     if user_inp == 1:
+          print("Add a new password")
+          site = input("site: ")
+          username = input("username: ")
+          password = input("password: ")
+          new_data = addNewPassword(key,data,password,site,username)
+          write_json(new_data)
+     elif user_inp ==2:
+          view_all_passwords(key,data)
+     elif user_inp ==3:
+               x = input("ENTER WEBSITE NAME: ")
+               sites = searchsite(x,data)
+               for d in sites:
+                    print(f'Website: {d.get("Website")}')
+                    print(f'Username: {d.get("Username")}')
+                    print(f'Password: {decrypt_pass(key, d.get("Password"))}')
+     elif user_inp ==4:
+          g_p = generaterandPassword()
+          print(g_p)
+     elif user_inp ==5:
+          pass
+     elif user_inp == 9:
+          pass
 
-
-
-
-if vault_path.exists() and vault_path.is_file():
-     with open(vault_path, 'r') as f:
-          data = json.load(f)
-     is_login, key = login(data)
-     while is_login:
-          CURD()
-          x = int(input(">>"))
-          if x == 1:
-               site = input("site: ")
-               username = input("username: ")
-               password = input("password: ")
-               new_data = addNewPassword(key,data,password,site,username)
-               write_json(new_data)
-          elif x == 2:
-               view_all_passwords(key,data)
-else:
+def makefile():
      vault_path.parent.mkdir()
      vault_path.write_text("")
-     signup()
-     with open(vault_path, 'r') as f:
-          data = json.load(f)
+
+
+
+
+
+if check():
+     data = read_json()
      is_login, key = login(data)
      while is_login:
           CURD()
-          x = int(input(">>"))
-          if x == 1:
-               site = input("site: ")
-               username = input("username: ")
-               password = input("password: ")
-               new_data = addNewPassword(key,data,password,site,username)
-               write_json(new_data)
-          elif x == 2:
-               view_all_passwords(key,data)
-        
+          CURDmanager(key,data)
+else:
+     makefile()
+     signup()
+     data = read_json()
+     is_login, key = login(data)
+     while is_login:
+          CURD()
+          CURDmanager(key,data)
 
           
 
