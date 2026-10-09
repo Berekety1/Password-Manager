@@ -1,216 +1,151 @@
-from pathlib import Path
-import json
-import hashlib
+"""Command-line password manager.
+
+    python main.py                      # vault at ~/.password_manager/vault.json
+    python main.py --vault my_vault.json
+"""
+import argparse
 import os
-import base64
-from cryptography.fernet import Fernet
-import string
-import secrets 
+from getpass import getpass
+from pathlib import Path
 
-vault_path = Path.home() / "password_manager" / "vault.json"
-def CURD():
-       print('Welcome back to Password Manager')
-       print("=== Password Manager ===")
-       print("1. Add New Password")
-       print("2. View All Passwords")
-       print("3. Search Password")
-       print("4. Generate Random Passowrd")
-       print("5. Delete Password")
-       print("9. Logout")
-       
+from vault import Vault, WrongPassword, generate_password
 
-def login(data):
-    user_master_key = input("ENTER YOUR MASTER KEY>> ")
-    salt = data.get('salt',[])
-    salt = base64.b64decode(salt)
-    user_master_key_hashed = hashlib.sha256(salt+user_master_key.encode()).hexdigest()
-    if user_master_key_hashed == data.get('master_password',{}):
-        encryption_key = generate_encryption_key(user_master_key,salt)
-        return True, encryption_key
-    else:
-        return False, None
-    
-def signup():
-    user_master_key = input("ENTER YOUR MASTER KEY>> ")
-    salt = os.urandom(16)
+DEFAULT_VAULT = Path(os.environ.get("PASSWORD_MANAGER_VAULT",
+                                    Path.home() / ".password_manager" / "vault.json"))
+MAX_ATTEMPTS = 3
 
-    hashed_password = hashlib.sha256(salt+user_master_key.encode()).hexdigest()
-
-    data = {
-        "master_password" : hashed_password,
-        "salt": base64.b64encode(salt).decode(),
-        "passwords": []
-
-    }
-    write_json(data)
-    return True
-
-def write_json(data,path = vault_path):
-    with open(path,'w') as f:
-        json.dump(data,f)
-
-def read_json(path = vault_path):
-    with open(path,'r') as f:
-        data = json.load(f)
-    return data
-
-def generate_encryption_key(password,salt,iterations=100000, algorithm = 'sha256'):
-        password_bytes = password.encode()
-        
-        key = hashlib.pbkdf2_hmac(
-        algorithm,
-        password_bytes,
-        salt,
-        iterations
-    )
-        return key
-    
+MENU = """
+=== Password Manager ===
+1. Add a password
+2. List saved accounts
+3. Show a password
+4. Generate a random password
+5. Delete a password
+6. Change master password
+0. Quit"""
 
 
-def encrypt_pass(key,password):
-     key = base64.b64encode(key)
-     password = password.encode()
-     f = Fernet(key)
-     e_password = f.encrypt(password)
-     return e_password
+def ask(prompt):
+    return input(prompt).strip()
 
 
-def decrypt_pass(key,e_password):
-     key = base64.b64encode(key)
-     f = Fernet(key)
-     password = f.decrypt(base64.b64decode(e_password)).decode()
-     return password
-
-
-def addNewPassword(key,data,password, site = '', username=''):
-     passwords = data.get('passwords', [])
-     new_password = {"Website": site, "Username":username, "Password": base64.b64encode(encrypt_pass(key,password)).decode()}
-     passwords.append(new_password)
-     data['passwords'] = passwords
-     return data # maybe directly write 
-
-def searchsite(site,data):
-     passwords = data.get("passwords",[])
-     found = []
-     for d in passwords:
-          if d.get('Website') == site:
-               found.append(d)
-     if len(found) == 0:
-          return 'No website found'
-     else:
-          return found
-
-
-def generaterandPassword(length = 12):
-     chrac = string.ascii_letters+string.digits+string.punctuation
-     password = ''.join(secrets.choice(chrac) for _ in range(length))
-     return password
-
-
-     
-
-def view_all_passwords(key, data):
-     passwords = data.get('passwords',[])
-     for d in passwords:
-        print(f'Website: {d.get("Website")}')
-        print(f'Username: {d.get("Username")}')
-        print(f'Password: {decrypt_pass(key, d.get("Password"))}')
-        x = input("DO YOU WANT TO SEE NEXT PASSWORD(y/n): ")
-        if x.capitalize() == 'Y':
-               continue
+def new_master_password():
+    while True:
+        password = getpass("Choose a master password: ")
+        if len(password) < 8:
+            print("Use at least 8 characters.")
+        elif password != getpass("Repeat it: "):
+            print("The passwords did not match, try again.")
         else:
-               break
+            return password
 
-def check():
-     if vault_path.exists() and vault_path.is_file():
-          return True
-     else:
-          return False
 
-     
-def welcome():
-     print("WELCOME")
-
-def CURDmanager(key, data):
-     while True:
+def unlock(path):
+    if not path.exists():
+        print(f"No vault found at {path}. Let's create one.")
+        vault = Vault.create(path, new_master_password())
+        print("Vault created.")
+        return vault
+    for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
-          user_inp = int(input(">>"))
-          break
-        except:
-             print("Something went wrong! please eneter a valid number")
-     if user_inp == 1:
-          print("Add a new password")
-          site = input("site: ")
-          username = input("username: ")
-          password = input("password: ")
-          new_data = addNewPassword(key,data,password,site,username)
-          write_json(new_data)
-     elif user_inp ==2:
-          view_all_passwords(key,data)
-     elif user_inp ==3:
-               x = input("ENTER WEBSITE NAME: ")
-               sites = searchsite(x,data)
-               for d in sites:
-                    print(f'Website: {d.get("Website")}')
-                    print(f'Username: {d.get("Username")}')
-                    print(f'Password: {decrypt_pass(key, d.get("Password"))}')
-     elif user_inp ==4:
-          g_p = generaterandPassword()
-          print(g_p)
-     elif user_inp ==5:
-          pass
-     elif user_inp == 9:
-          pass
-
-def makefile():
-     vault_path.parent.mkdir()
-     vault_path.write_text("")
+            return Vault.open(path, getpass("Master password: "))
+        except WrongPassword:
+            print(f"Wrong master password ({attempt}/{MAX_ATTEMPTS}).")
+    return None
 
 
+def choose(entries, action):
+    """Let the user pick one entry from a numbered list."""
+    for i, e in enumerate(entries, 1):
+        print(f"  {i}. {e['site']}  ({e['username']})")
+    choice = ask(f"Number to {action} (Enter to cancel): ")
+    if choice.isdigit() and 1 <= int(choice) <= len(entries):
+        return entries[int(choice) - 1]
+    return None
 
 
-
-if check():
-     data = read_json()
-     is_login, key = login(data)
-     while is_login:
-          CURD()
-          CURDmanager(key,data)
-else:
-     makefile()
-     signup()
-     data = read_json()
-     is_login, key = login(data)
-     while is_login:
-          CURD()
-          CURDmanager(key,data)
-
-          
+def search(vault, action):
+    matches = vault.find(ask("Website (or part of it): "))
+    if not matches:
+        print("No matching accounts.")
+        return None
+    return choose(matches, action)
 
 
+def add(vault):
+    site = ask("Website: ")
+    if not site:
+        print("A website is required.")
+        return
+    username = ask("Username: ")
+    password = getpass("Password (leave empty to generate one): ")
+    if not password:
+        password = generate_password()
+        print(f"Generated password: {password}")
+    vault.add(site, username, password)
+    print(f"Saved {site}.")
 
 
+def list_accounts(vault):
+    if not vault.entries:
+        print("The vault is empty.")
+    for e in sorted(vault.entries, key=lambda e: e["site"].lower()):
+        print(f"  {e['site']}  ({e['username']})")
 
 
+def show(vault):
+    entry = search(vault, "show")
+    if entry:
+        print(f"  Website:  {entry['site']}\n  Username: {entry['username']}\n  Password: {entry['password']}")
 
 
+def generate():
+    length = ask("Length (default 16): ")
+    try:
+        print(generate_password(int(length) if length else 16))
+    except ValueError:
+        print("Enter a whole number of at least 4.")
 
 
+def delete(vault):
+    entry = search(vault, "delete")
+    if entry and ask(f"Delete {entry['site']} ({entry['username']})? (y/n): ").lower() == "y":
+        vault.delete(entry)
+        print("Deleted.")
 
 
+def change_master(vault):
+    vault.change_master_password(new_master_password())
+    print("Master password changed.")
 
 
+def main():
+    parser = argparse.ArgumentParser(description="Command-line password manager")
+    parser.add_argument("--vault", type=Path, default=DEFAULT_VAULT, help="path to the vault file")
+    args = parser.parse_args()
+
+    vault = unlock(args.vault)
+    if vault is None:
+        print("Too many wrong attempts.")
+        return
+
+    actions = {"1": add, "2": list_accounts, "3": show, "5": delete, "6": change_master}
+    while True:
+        print(MENU)
+        choice = ask("> ")
+        if choice == "0":
+            print("Bye!")
+            break
+        elif choice == "4":
+            generate()
+        elif choice in actions:
+            actions[choice](vault)
+        else:
+            print("Please choose one of the numbers above.")
 
 
-
-
-
-
-
-
-
-
-
-
-
-
+if __name__ == "__main__":
+    try:
+        main()
+    except (KeyboardInterrupt, EOFError):
+        print("\nBye!")
